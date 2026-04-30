@@ -1,28 +1,25 @@
 FROM node:20-alpine
 
-# Install ffmpeg dan dependencies native
+# Install ffmpeg dan build tools untuk native modules
 RUN apk add --no-cache \
     ffmpeg \
     python3 \
     make \
-    g++ \
-    libc6-compat
+    g++
 
-# Set working directory
 WORKDIR /app
 
-# Copy package files dulu (layer caching)
+# Copy package files dulu (layer cache)
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install --omit=dev
+# Install dependencies — legacy-peer-deps menghindari konflik antar peer deps
+RUN npm install --omit=dev --legacy-peer-deps
 
-# Copy seluruh source code
+# Copy source code
 COPY . .
 
-# Jangan jalankan sebagai root
+# Jalankan sebagai non-root
 RUN addgroup -S botuser && adduser -S botuser -G botuser
 USER botuser
 
-# Start bot
 CMD ["node", "src/index.js"]
