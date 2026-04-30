@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  selfbot:
+    build: .
+    container_name: discord-selfbot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - NODE_ENV=production
+    # Uncomment untuk limit resource
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 512M
