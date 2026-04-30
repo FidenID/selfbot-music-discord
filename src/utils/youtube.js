@@ -1,6 +1,5 @@
-const ytsr = require('ytsr');
+const playdl = require('play-dl');
 const ytpl = require('ytpl');
-const ytdl = require('ytdl-core');
 
 // Cek apakah string adalah URL YouTube
 function isYouTubeUrl(str) {
@@ -12,38 +11,56 @@ function isPlaylist(str) {
   return /[?&]list=/.test(str) || /youtube\.com\/playlist/.test(str);
 }
 
-// Cek apakah URL adalah TikTok
-function isTikTokUrl(str) {
-  return /tiktok\.com/.test(str);
+// Cari lagu di YouTube via play-dl
+async function searchYouTube(query, limit = 5) {
+  const results = await playdl.search(query, { source: { youtube: 'video' }, limit });
+  return results;
 }
 
-// Cari lagu di YouTube
-async function searchYouTube(query, limit = 1) {
-  const filters = await ytsr.getFilters(query);
-  const filter = filters.get('Type')?.get('Video');
-  const results = await ytsr(filter?.url || query, { limit });
-  return results.items.filter(i => i.type === 'video');
-}
-
-// Ambil info video dari URL/ID YouTube
+// Ambil info video dari URL YouTube
 async function getVideoInfo(url) {
+  const info = await playdl.video_info(url);
+  const details = info.video_details;
+  return {
+    title: details.title || 'Unknown',
+    url: details.url,
+    thumbnail: details.thumbnails?.[0]?.url || '',
+    duration: details.durationInSec || 0,
+    channel: details.channel?.name || 'Unknown',
+    source: 'youtube',
+  };
+}
+
+// Ambil stream dari URL YouTube (langsung bisa dipakai player)
+async function getYTStream(url) {
+  const stream = await playdl.stream(url, { quality: 2 });
+  return stream;
+}
+
+// Ambil rekomendasi YouTube untuk autoplay
+async function getRecommendations(videoUrl) {
   try {
-    const info = await ytdl.getInfo(url);
-    const details = info.videoDetails;
+    const info = await playdl.video_info(videoUrl);
+    const related = info.related_videos;
+    if (!related?.length) return null;
+
+    const next = related.find(v => v.id && !v.live && v.durationInSec > 0);
+    if (!next) return null;
+
     return {
-      title: details.title,
-      url: details.video_url,
-      thumbnail: details.thumbnails?.[details.thumbnails.length - 1]?.url || '',
-      duration: parseInt(details.lengthSeconds),
-      channel: details.author?.name || 'Unknown',
-      views: details.viewCount,
+      title: next.title || 'Unknown',
+      url: `https://www.youtube.com/watch?v=${next.id}`,
+      thumbnail: next.thumbnails?.[0]?.url || '',
+      duration: next.durationInSec || 0,
+      channel: next.channel?.name || 'Unknown',
+      source: 'youtube',
     };
-  } catch (err) {
-    throw new Error(`Gagal ambil info video: ${err.message}`);
+  } catch (_) {
+    return null;
   }
 }
 
-// Ambil semua video dari playlist
+// Ambil semua video dari playlist YouTube
 async function getPlaylistVideos(url, limit = 50) {
   try {
     const playlist = await ytpl(url, { limit });
@@ -53,68 +70,40 @@ async function getPlaylistVideos(url, limit = 50) {
       thumbnail: item.bestThumbnail?.url || '',
       duration: item.durationSec || 0,
       channel: item.author?.name || 'Unknown',
+      source: 'youtube',
     }));
   } catch (err) {
     throw new Error(`Gagal ambil playlist: ${err.message}`);
   }
 }
 
-// Ambil rekomendasi YouTube (autoplay) dari lagu terakhir
-async function getRecommendations(videoUrl) {
-  try {
-    const info = await ytdl.getInfo(videoUrl);
-    const related = info.related_videos;
-    if (!related || related.length === 0) return null;
-
-    // Ambil video pertama dari related yang bukan live
-    const next = related.find(v => v.id && !v.isLive && v.length_seconds > 0);
-    if (!next) return null;
-
-    return {
-      title: next.title,
-      url: `https://www.youtube.com/watch?v=${next.id}`,
-      thumbnail: next.thumbnails?.[0]?.url || '',
-      duration: next.length_seconds || 0,
-      channel: next.author?.name || 'Unknown',
-    };
-  } catch (_) {
-    return null;
-  }
-}
-
-// Resolve query: URL atau search
+// Resolve query: URL atau search keyword
 async function resolveSong(query) {
   if (isYouTubeUrl(query)) {
     return await getVideoInfo(query);
   }
+
   const results = await searchYouTube(query, 1);
   if (!results.length) throw new Error('Lagu tidak ditemukan di YouTube.');
+
   const v = results[0];
   return {
-    title: v.title,
+    title: v.title || 'Unknown',
     url: v.url,
-    thumbnail: v.bestThumbnail?.url || '',
-    duration: v.duration ? parseDuration(v.duration) : 0,
-    channel: v.author?.name || 'Unknown',
+    thumbnail: v.thumbnails?.[0]?.url || '',
+    duration: v.durationInSec || 0,
+    channel: v.channel?.name || 'Unknown',
+    source: 'youtube',
   };
-}
-
-// Parse durasi string "mm:ss" atau "hh:mm:ss" ke detik
-function parseDuration(str) {
-  if (!str) return 0;
-  const parts = str.split(':').map(Number);
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  return 0;
 }
 
 module.exports = {
   isYouTubeUrl,
   isPlaylist,
-  isTikTokUrl,
   searchYouTube,
   getVideoInfo,
-  getPlaylistVideos,
+  getYTStream,
   getRecommendations,
+  getPlaylistVideos,
   resolveSong,
 };

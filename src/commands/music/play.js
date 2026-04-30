@@ -1,23 +1,24 @@
 const { joinVoiceChannel } = require('@discordjs/voice');
-const { getQueue, createQueue, hasQueue } = require('../../utils/queueManager');
+const { getQueue, createQueue } = require('../../utils/queueManager');
 const { setupPlayer, playSong } = require('../../utils/audioPlayer');
 const { reply } = require('../../utils/helpers');
-const { isPlaylist, resolveSong, getPlaylistVideos } = require('../../utils/youtube');
+const { isPlaylist, resolveSong } = require('../../utils/youtube');
+const { isTikTokUrl, getTikTokAudio } = require('../../utils/tiktok');
+const { getPlaylistVideos } = require('../../utils/youtube');
 const config = require('../../../config');
 
 module.exports = {
   name: 'p',
   aliases: ['play'],
   category: 'music',
-  description: 'Putar lagu dari YouTube atau playlist',
-  usage: '?p <judul/URL> [limit playlist]',
+  description: 'Putar lagu dari YouTube atau TikTok',
+  usage: '?p <judul/URL YouTube/URL TikTok> [limit playlist]',
 
   async execute(msg, args) {
     if (!args.length) {
-      return reply(msg, `❌ Masukkan judul lagu atau URL.\n**Contoh:** \`${config.prefix}p Coldplay Yellow\``);
+      return reply(msg, `❌ Masukkan judul lagu atau URL.\n**Contoh:**\n> \`${config.prefix}p Coldplay Yellow\`\n> \`${config.prefix}p https://www.tiktok.com/@user/video/xxx\``);
     }
 
-    // Cek apakah user ada di voice channel
     const voiceChannel = msg.member?.voice?.channel;
     if (!voiceChannel) {
       return reply(msg, '❌ Kamu harus masuk ke Voice Channel dulu!');
@@ -28,7 +29,6 @@ module.exports = {
 
     let queue = getQueue(msg.guild.id);
 
-    // Buat queue dan join VC kalau belum ada
     if (!queue) {
       queue = createQueue(msg.guild.id, {
         voiceChannel,
@@ -51,27 +51,51 @@ module.exports = {
       queue.lastCommandAuthor = msg.author;
     }
 
-    // Handle playlist
+    // ── TikTok ────────────────────────────────────────────
+    if (isTikTokUrl(query)) {
+      await reply(msg, `⏳ Mengambil audio TikTok...`);
+      try {
+        const song = await getTikTokAudio(query);
+        song.requestedBy = msg.author;
+        queue.songs.push(song);
+
+        if (!queue.playing) {
+          playSong(queue);
+        } else {
+          await reply(msg, `✅ **TikTok ditambahkan ke queue:**\n\`${song.title}\``);
+        }
+      } catch (err) {
+        return reply(msg, `❌ Gagal ambil TikTok: ${err.message}`);
+      }
+      return;
+    }
+
+    // ── YouTube Playlist ──────────────────────────────────
     if (isPlaylist(query)) {
-      await reply(msg, `⏳ Memuat playlist, mohon tunggu...`);
+      await reply(msg, `⏳ Memuat playlist YouTube, mohon tunggu...`);
       try {
         const videos = await getPlaylistVideos(query, limitArg);
         if (!videos.length) return reply(msg, '❌ Playlist kosong atau tidak bisa diakses.');
 
-        videos.forEach(v => { v.requestedBy = msg.author; queue.songs.push(v); });
+        videos.forEach(v => {
+          v.requestedBy = msg.author;
+          v.source = 'youtube';
+          queue.songs.push(v);
+        });
 
         await reply(msg, `✅ **${videos.length} lagu** ditambahkan dari playlist ke queue!`);
         if (!queue.playing) playSong(queue);
-        return;
       } catch (err) {
         return reply(msg, `❌ Gagal memuat playlist: ${err.message}`);
       }
+      return;
     }
 
-    // Handle single song
+    // ── YouTube Single ────────────────────────────────────
     try {
       const song = await resolveSong(query);
       song.requestedBy = msg.author;
+      song.source = 'youtube';
       queue.songs.push(song);
 
       if (!queue.playing) {
